@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <world name="disaster_hospital">
+    <physics name="1ms" type="ignored"><max_step_size>0.001</max_step_size><real_time_factor>1.0</real_time_factor></physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+    
+    <light type="directional" name="sun"><cast_shadows>true</cast_shadows><pose>0 0 10 0 0 0</pose><diffuse>0.8 0.8 0.8 1</diffuse><specular>0.2 0.2 0.2 1</specular><direction>-0.5 0.1 -0.9</direction></light>
+
+    <model name="ground_plane"><static>true</static><link name="link"><collision name="collision"><geometry><plane><normal>0 0 1</normal><size>30 30</size></plane></geometry></collision><visual name="visual"><geometry><plane><normal>0 0 1</normal><size>30 30</size></plane></geometry><material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material></visual></link></model>
+    <model name="safe_zone"><static>true</static><pose>0 12 0.01 0 0 0</pose><link name="link"><visual name="visual"><geometry><plane><normal>0 0 1</normal><size>8 4</size></plane></geometry><material><ambient>0.0 0.8 0.0 1</ambient><diffuse>0.0 0.8 0.0 1</diffuse></material></visual></link></model>
+    <model name="hospital_walls"><static>true</static>
+      <link name="north_wall"><pose>0 15 1 0 0 0</pose><collision name="c1"><geometry><box><size>30 0.2 2</size></box></geometry></collision><visual name="v1"><geometry><box><size>30 0.2 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+      <link name="south_wall"><pose>0 -15 1 0 0 0</pose><collision name="c2"><geometry><box><size>30 0.2 2</size></box></geometry></collision><visual name="v2"><geometry><box><size>30 0.2 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+      <link name="east_wall"><pose>15 0 1 0 0 0</pose><collision name="c3"><geometry><box><size>0.2 30 2</size></box></geometry></collision><visual name="v3"><geometry><box><size>0.2 30 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+      <link name="west_wall"><pose>-15 0 1 0 0 0</pose><collision name="c4"><geometry><box><size>0.2 30 2</size></box></geometry></collision><visual name="v4"><geometry><box><size>0.2 30 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+      <link name="corridor_left"><pose>-8 5 1 0 0 0</pose><collision name="c5"><geometry><box><size>14 0.2 2</size></box></geometry></collision><visual name="v5"><geometry><box><size>14 0.2 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+      <link name="corridor_right"><pose>8 5 1 0 0 0</pose><collision name="c6"><geometry><box><size>14 0.2 2</size></box></geometry></collision><visual name="v6"><geometry><box><size>14 0.2 2</size></box></geometry><material><ambient>0.5 0.5 0.5 1</ambient></material></visual></link>
+    </model>
+  </world>
+</sdf>
