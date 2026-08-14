@@ -6,7 +6,6 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool
 from rclpy.qos import qos_profile_sensor_data
 import math
-import time
 
 class MathematicalSwarm(Node):
     def __init__(self):
@@ -21,7 +20,12 @@ class MathematicalSwarm(Node):
         self.alert_pub = self.create_publisher(Bool, '/rescue_alert', 10)
         self.alert_sub = self.create_subscription(Bool, '/rescue_alert', self.alert_callback, 10)
 
-        self.start_time = time.time()
+        self.loop_ticks = 0
+        self.shift_ticks = 0
+        
+        self.room_shift_dir = -1.0 
+        self.march_yaw = 0.0
+        
         if self.name == 'robot_1':
             self.state = "DEPLOY"
             self.get_logger().info("[LEADER] Tactical Breach Initiated.")
@@ -38,13 +42,10 @@ class MathematicalSwarm(Node):
         self.current_yaw = 0.0 
         self.min_front = 10.0
         
-        self.victim_x = 3.0
-        self.victim_y = -4.0
+        self.victim_x = -6.0
+        self.victim_y = -3.0
         
-        self.sweep_dir = -1.0 if self.name == 'robot_3' else 1.0 
         self.target_yaw = 0.0
-        self.shift_start_time = 0.0
-
         self.timer = self.create_timer(0.05, self.control_loop) 
 
     def alert_callback(self, msg):
@@ -63,13 +64,12 @@ class MathematicalSwarm(Node):
         self.current_yaw = math.atan2(siny_cosp, cosy_cosp)
 
     def scan_callback(self, msg):
-        mid = len(msg.ranges) // 2
-        # THE FIX: Extreme tunnel vision for the doorway, wide vision for the room.
-        if self.state in ["WAITING", "DEPLOY"]:
-            front_arc = msg.ranges[mid - 10 : mid + 10] 
-        else:
-            front_arc = msg.ranges[mid - 40 : mid + 40] 
+        if self.state in ["WAITING", "DEPLOY", "FAN_OUT_TURN", "FAN_OUT_DRIVE", "FACE_MARCH"]:
+            self.min_front = 10.0
+            return
             
+        mid = len(msg.ranges) // 2
+        front_arc = msg.ranges[mid - 3 : mid + 3] 
         valid_front = [r for r in front_arc if not math.isinf(r) and not math.isnan(r) and r > 0.05]
         self.min_front = min(valid_front) if valid_front else 10.0
 
@@ -79,65 +79,107 @@ class MathematicalSwarm(Node):
         return angle
 
     def control_loop(self):
+        self.loop_ticks += 1
         cmd = Twist()
         
-        # 🚨 VICTIM DETECTION 🚨
-        dist_to_victim = math.sqrt((self.current_x - self.victim_x)**2 + (self.current_y - self.victim_y)**2)
-        if dist_to_victim < 2.0 and self.state != "RESCUE":
-            self.get_logger().error(f"[{self.name.upper()}] 🚨 VICTIM LOCATED! Broadcasting to Swarm. 🚨")
+        dist_to_victim = math.hypot(self.current_x - self.victim_x, self.current_y - self.victim_y)
+        if dist_to_victim < 2.0 and self.state not in ["RESCUE", "STANDBY"]:
+            self.get_logger().info(f"[{self.name.upper()}] 🚨 VICTIM LOCATED! Broadcasting to Swarm. 🚨")
             self.state = "RESCUE"
             msg = Bool()
             msg.data = True
             self.alert_pub.publish(msg)
         
-        # THE FIX: Split emergency avoidance thresholds
-        if self.state == "DEPLOY" and self.min_front < 0.8:
-            self.state = "TURN_1"
-            self.target_yaw = self.normalize_angle(self.current_yaw + (self.sweep_dir * 1.57))
-        elif self.state == "SWEEP" and self.min_front < 2.0:
-            self.state = "TURN_1"
-            self.target_yaw = self.normalize_angle(self.current_yaw + (self.sweep_dir * 1.57))
-        
-        # --- STATE MACHINE ---
         if self.state == "WAITING":
-            if time.time() - self.start_time > 3.0: 
+            if self.loop_ticks > 60: 
                 self.state = "DEPLOY"
                 
         elif self.state == "DEPLOY":
             if self.current_y > 2.0: 
-                cmd.linear.x = 0.8 # Moderate speed to safely thread the needle through the door
+                cmd.linear.x = 0.8 
+                err = self.normalize_angle(0.0 - self.current_yaw)
+                cmd.angular.z = max(-1.0, min(1.0, 4.0 * err))
             else:
-                self.state = "SWEEP"
+                self.state = "FAN_OUT_TURN"
+                if self.name == 'robot_2': self.target_yaw = 1.5708
+                elif self.name == 'robot_3': self.target_yaw = -1.5708
+                else: self.target_yaw = 0.0
                 
-        elif self.state == "SWEEP":
-            # High speed sweep mode!
-            cmd.linear.x = 1.5 
-                
-        elif self.state == "TURN_1":
+        elif self.state == "FAN_OUT_TURN":
+            cmd.linear.x = 0.0 
             err = self.normalize_angle(self.target_yaw - self.current_yaw)
-            if abs(err) > 0.1: cmd.angular.z = 2.5 * err 
+            if abs(err) > 0.05: 
+                cmd.angular.z = max(-1.5, min(1.5, 4.0 * err))
             else:
-                self.state = "SHIFT"
-                self.shift_start_time = time.time()
-                
-        elif self.state == "SHIFT":
-            if time.time() - self.shift_start_time < 1.0: cmd.linear.x = 1.0 
-            else:
-                self.state = "TURN_2"
-                self.target_yaw = self.normalize_angle(self.current_yaw + (self.sweep_dir * 1.57))
-                
-        elif self.state == "TURN_2":
+                self.state = "FAN_OUT_DRIVE"
+                self.shift_ticks = 0
+
+        elif self.state == "FAN_OUT_DRIVE":
+            cmd.linear.x = 0.8 if self.name != 'robot_1' else 0.0 
             err = self.normalize_angle(self.target_yaw - self.current_yaw)
-            if abs(err) > 0.1: cmd.angular.z = 2.5 * err 
-            else:
-                self.state = "SWEEP"
-                self.sweep_dir *= -1.0 
-                
-        elif self.state == "RESCUE":
+            cmd.angular.z = max(-1.0, min(1.0, 4.0 * err))
+            self.shift_ticks += 1
+            if self.shift_ticks > 35: 
+                self.state = "FACE_MARCH"
+                self.target_yaw = 0.0 
+
+        elif self.state == "FACE_MARCH":
             cmd.linear.x = 0.0
-            cmd.angular.z = 3.0
+            err = self.normalize_angle(self.target_yaw - self.current_yaw)
+            if abs(err) > 0.05:
+                cmd.angular.z = max(-1.5, min(1.5, 4.0 * err))
+            else:
+                self.state = "MARCH"
+
+        elif self.state == "MARCH":
+            cmd.linear.x = 0.8 
+            err = self.normalize_angle(self.target_yaw - self.current_yaw)
+            cmd.angular.z = max(-1.0, min(1.0, 4.0 * err)) 
             
-        elif self.state == "STANDBY":
+            # GEOFENCE FIX: Moved up to Y=4.5 so they sweep all the way to the front wall!
+            facing_north = abs(self.target_yaw) > 1.5 
+            hit_virtual_wall = (self.current_y > 4.5 and facing_north)
+            
+            if self.min_front < 1.0 or hit_virtual_wall:
+                self.state = "SWEEP_TURN_1"
+                self.march_yaw = self.current_yaw 
+                
+                if abs(self.current_yaw) < 1.5: 
+                    self.target_yaw = self.normalize_angle(self.current_yaw + (self.room_shift_dir * 1.5708))
+                else: 
+                    self.target_yaw = self.normalize_angle(self.current_yaw - (self.room_shift_dir * 1.5708))
+
+        elif self.state == "SWEEP_TURN_1":
+            cmd.linear.x = 0.0
+            err = self.normalize_angle(self.target_yaw - self.current_yaw)
+            if abs(err) > 0.05:
+                cmd.angular.z = max(-1.5, min(1.5, 4.0 * err))
+            else:
+                self.state = "SWEEP_SHIFT" 
+                self.shift_ticks = 0
+
+        elif self.state == "SWEEP_SHIFT":
+            cmd.linear.x = 0.6
+            err = self.normalize_angle(self.target_yaw - self.current_yaw)
+            cmd.angular.z = max(-1.0, min(1.0, 4.0 * err))
+            self.shift_ticks += 1
+            
+            if self.shift_ticks > 30 or self.min_front < 0.8:
+                if self.min_front < 0.8:
+                    self.room_shift_dir *= -1.0 
+                    
+                self.state = "SWEEP_TURN_2"
+                self.target_yaw = self.normalize_angle(self.march_yaw + 3.14159) 
+
+        elif self.state == "SWEEP_TURN_2":
+            cmd.linear.x = 0.0
+            err = self.normalize_angle(self.target_yaw - self.current_yaw)
+            if abs(err) > 0.05:
+                cmd.angular.z = max(-1.5, min(1.5, 4.0 * err))
+            else:
+                self.state = "MARCH" 
+                
+        elif self.state in ["RESCUE", "STANDBY"]:
             cmd.linear.x = 0.0
             cmd.angular.z = 0.0
                 
