@@ -119,8 +119,8 @@ class HospitalNavigator(Node):
             f'Ward: {ward_name} ({ward_x:.2f}, {ward_y:.2f})')
 
     def odom_callback(self, msg: Odometry):
-        self.current_x = msg.pose.pose.position.x
-        self.current_y = msg.pose.pose.position.y
+        self.current_x = msg.pose.pose.position.x + self.home_x
+        self.current_y = msg.pose.pose.position.y + self.home_y
         self.current_yaw = yaw_from_quaternion(msg.pose.pose.orientation)
         if not self.have_pose:
             self.state_entry_time = self.get_clock().now()
